@@ -3,8 +3,11 @@ package fr.yguion.spring.authenticationserver;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.config.annotation.configurers.ClientDetailsServiceConfigurer;
 import org.springframework.security.oauth2.config.annotation.web.configuration.AuthorizationServerConfigurerAdapter;
@@ -19,6 +22,11 @@ import org.springframework.security.oauth2.provider.client.ClientCredentialsToke
 import org.springframework.security.oauth2.provider.code.AuthorizationCodeServices;
 
 import org.springframework.security.oauth2.provider.token.AuthorizationServerTokenServices;
+import org.springframework.security.oauth2.provider.token.TokenEnhancer;
+import org.springframework.security.oauth2.provider.token.TokenEnhancerChain;
+import org.springframework.security.oauth2.provider.token.TokenStore;
+import org.springframework.security.oauth2.provider.token.store.JwtAccessTokenConverter;
+import org.springframework.security.oauth2.provider.token.store.JwtTokenStore;
 
 import fr.yguion.spring.authenticationserver.pkce.PkceAuthorizationCodeServices;
 import fr.yguion.spring.authenticationserver.pkce.PkceAuthorizationCodeTokenGranter;
@@ -35,9 +43,12 @@ public class AuthServerConfig extends AuthorizationServerConfigurerAdapter {
     private String RedirectURLs;
 
     private final PasswordEncoder passwordEncoder;
+    private AuthenticationManager authenticationManager;
 
-    public AuthServerConfig(PasswordEncoder passwordEncoder) {
+    @Autowired
+    public AuthServerConfig(PasswordEncoder passwordEncoder, AuthenticationManager authenticationManager) {
         this.passwordEncoder = passwordEncoder;
+        this.authenticationManager = authenticationManager;
     }
 
     @Override
@@ -47,11 +58,33 @@ public class AuthServerConfig extends AuthorizationServerConfigurerAdapter {
             .checkTokenAccess("isAuthenticated()");
   }
 
+
+    @Bean
+    public JwtAccessTokenConverter accessTokenConverter() {
+        JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
+        converter.setAccessTokenConverter(new CustomAccessTokenConverter());
+        converter.setSigningKey("123456");
+        return converter;
+    }
+
+    @Bean
+    public TokenStore tokenStore() {
+        return new JwtTokenStore(accessTokenConverter());
+    }
+
     @Override
     public void configure(AuthorizationServerEndpointsConfigurer endpoints) {
-        endpoints
+        List<TokenEnhancer> lists = new ArrayList<>();
+        lists.add(new CustomTokenEnhancer());
+        lists.add(accessTokenConverter());
+        TokenEnhancerChain tokenEnhancerChain = new TokenEnhancerChain();
+        tokenEnhancerChain.setTokenEnhancers(lists);
+        endpoints.authenticationManager(authenticationManager)
             .authorizationCodeServices(new PkceAuthorizationCodeServices(endpoints.getClientDetailsService(), passwordEncoder))
-            .tokenGranter(tokenGranter(endpoints));
+            .tokenGranter(tokenGranter(endpoints))
+            .tokenEnhancer(tokenEnhancerChain)
+            .accessTokenConverter(accessTokenConverter())
+            .tokenStore(tokenStore());
     }
 
     private TokenGranter tokenGranter(final AuthorizationServerEndpointsConfigurer endpoints) {
